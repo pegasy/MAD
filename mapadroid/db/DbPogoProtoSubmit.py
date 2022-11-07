@@ -77,12 +77,13 @@ class DbPogoProtoSubmit:
                 lon = wild_mon["longitude"]
                 mon_id = wild_mon["pokemon_data"]["id"]
                 encounter_id = wild_mon["encounter_id"]
+                weather_boosted = wild_mon["pokemon_data"]["display"]["weather_boosted_value"]
 
                 if encounter_id < 0:
                     encounter_id = encounter_id + 2 ** 64
                 encounter_ids_in_gmo.append(encounter_id)
 
-                cache_key = "mon{}-{}".format(encounter_id, mon_id)
+                cache_key = "mon{}-{}-{}".format(encounter_id, weather_boosted, mon_id)
                 if await self._cache.exists(cache_key):
                     continue
 
@@ -108,7 +109,8 @@ class DbPogoProtoSubmit:
                         mon.spawnpoint_id = spawnid
                         mon.latitude = lat
                         mon.longitude = lon
-                    mon.pokemon_id = mon_id
+                        mon.pokemon_id = mon_id
+                    await self._reset_iv_if_needed(mon, mon_id, weather_boosted)
                     if mon.seen_type not in [MonSeenTypes.encounter.name, MonSeenTypes.lure_encounter.name]:
                         # TODO: Any other types not to overwrite?
                         mon.seen_type = MonSeenTypes.wild.name
@@ -128,7 +130,7 @@ class DbPogoProtoSubmit:
                     #  Further we should probably reset IVs if pokemon_id changes as well
 
                     mon.disappear_time = despawn_time
-                    mon.weather_boosted_condition = wild_mon["pokemon_data"]["display"]["weather_boosted_value"]
+                    mon.weather_boosted_condition = weather_boosted
                     mon.last_modified = now
                     try:
                         session.add(mon)
@@ -168,7 +170,7 @@ class DbPogoProtoSubmit:
 
                 cache_key = "monnear{}-{}".format(encounter_id, mon_id)
                 encounter_key = "moniv{}-{}-{}".format(encounter_id, weather_boosted, mon_id)
-                wild_key = "mon{}-{}".format(encounter_id, mon_id)
+                wild_key = "mon{}-{}-{}".format(encounter_id, weather_boosted, mon_id)
                 if (await self._cache.exists(wild_key) or await self._cache.exists(encounter_key)
                         or await self._cache.exists(cache_key)):
                     continue
@@ -214,7 +216,7 @@ class DbPogoProtoSubmit:
                         mon.fort_id = stop_id
                         mon.seen_type = seen_type.name
                         mon.disappear_time = disappear_time
-
+                    await self._reset_iv_if_needed(mon, mon_id, weather_boosted)
                     if mon_id == 132:
                         # handle ditto
                         mon.pokemon_id = 132
@@ -328,6 +330,18 @@ class DbPogoProtoSubmit:
         logger.debug("Done updating mon IV in DB in {} seconds", time_done)
 
         return encounter_id, is_shiny
+
+    async def _reset_iv_if_needed(self, mon, mon_id, weather_boosted):
+        if mon.pokemon_id != mon_id or mon.weather_boosted_condition != weather_boosted:
+            mon.individual_attack = None
+            mon.individual_defense = None
+            mon.individual_stamina = None
+            mon.move_1 = None
+            mon.move_2 = None
+            mon.cp = None
+            mon.cp_multiplier = None
+            mon.weight = None
+            mon.height = None
 
     async def _extract_data_or_set_ditto(self, mon_id, pokemon_data, pokemon_display):
         if is_mon_ditto(pokemon_data):
